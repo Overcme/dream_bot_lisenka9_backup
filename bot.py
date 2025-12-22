@@ -24,23 +24,34 @@ class CourseScheduler:
         self.application = application
         self.db = db
         self.running = False
+        self.loop = None
         
     def start(self):
         """Запускает планировщик"""
         self.running = True
+        # Получаем event loop из приложения
+        if hasattr(self.application, '_loop'):
+            self.loop = self.application._loop
+        elif hasattr(self.application, 'loop'):
+            self.loop = self.application.loop
+        else:
+            # Создаем новый loop если не нашли
+            self.loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(self.loop)
+        
         thread = threading.Thread(target=self._run_scheduler, daemon=True)
         thread.start()
-        logger.info("✅ Course scheduler started")
+        logger.info(f"✅ Course scheduler started (loop: {self.loop})")
     
     def _run_scheduler(self):
         """Запускает цикл планировщика"""
         while self.running:
             try:
                 self.check_and_send_messages()
-                time.sleep(60)  # Проверяем каждую минуту
+                time.sleep(60)
             except Exception as e:
                 logger.error(f"❌ Scheduler error: {e}")
-                time.sleep(300)  # При ошибке ждем 5 минут
+                time.sleep(300)
     
     def check_and_send_messages(self):
         """Проверяет и отправляет сообщения пользователям"""
@@ -51,7 +62,6 @@ class CourseScheduler:
             
             cursor = conn.cursor()
             
-            # Исправленный запрос
             cursor.execute('''
                 SELECT user_id, current_day 
                 FROM course_progress 
@@ -70,19 +80,17 @@ class CourseScheduler:
                 try:
                     logger.info(f"📨 Sending day {current_day} to user {user_id}")
                     
-                    # СОЗДАЕМ АСИНХРОННУЮ ЗАДАЧУ ВНУТРИ ПРИЛОЖЕНИЯ
-                    if hasattr(self.application, 'create_task'):
-                        # Создаем задачу внутри event loop приложения
-                        self.application.create_task(
-                            self.send_course_day(user_id, current_day)
+                    if self.loop and self.loop.is_running():
+                        # Используем существующий loop
+                        future = asyncio.run_coroutine_threadsafe(
+                            self.send_course_day(user_id, current_day),
+                            self.loop
                         )
+                        # Можно добавить обработку результата если нужно
+                        # result = future.result(timeout=30)
                     else:
-                        # Альтернативный способ для старых версий
-                        import asyncio
-                        loop = asyncio.get_event_loop()
-                        loop.create_task(
-                            self.send_course_day(user_id, current_day)
-                        )
+                        # Создаем новый loop для этого вызова
+                        asyncio.run(self.send_course_day_safe(user_id, current_day))
                     
                     time.sleep(0.1)
                     
@@ -647,6 +655,12 @@ def main():
         global telegram_app
         telegram_app = application
         
+        logger.info(f"🔍 Application has _loop: {hasattr(application, '_loop')}")
+        logger.info(f"🔍 Application has loop: {hasattr(application, 'loop')}")
+        if hasattr(application, '_loop'):
+            logger.info(f"🔍 Application._loop: {application._loop}")
+            logger.info(f"🔍 Loop is running: {application._loop.is_running() if application._loop else 'No loop'}")
+            
         # Настраиваем обработчики
         setup_handlers(application)
         
