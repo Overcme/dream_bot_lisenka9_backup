@@ -394,73 +394,84 @@ class PaymentProcessor:
         except Exception as e:
             logger.error(f"Error in admin notification: {e}")
     
-async def notify_admin_on_payment_check(user_id: int, payment_id: str, method: str, status: str, db_instance=None):
+async def notify_admin_on_payment_check(self, user_id: int, payment_id: str, method: str, status: str):
     """Уведомляет администратора о проверке платежа"""
     try:
+        logger.info(f"📨 START: Sending payment check notification for {payment_id}")
+        
         from telegram import Bot
         from config import BOT_TOKEN
         
+        logger.info(f"📨 Creating bot instance...")
         bot = Bot(token=BOT_TOKEN)
         
         # Получаем информацию о пользователе
         user_info = f"👤 ID: {user_id}"
+        try:
+            logger.info(f"📨 Getting user info from DB for {user_id}...")
+            conn = self.db.get_connection()
+            if conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT username, first_name FROM users WHERE user_id = %s",
+                    (user_id,)
+                )
+                result = cursor.fetchone()
+                if result:
+                    username, first_name = result
+                    logger.info(f"📨 Found user: {first_name}, @{username}")
+                    if username:
+                        user_info = f"👤 {first_name or 'Пользователь'} (@{username})"
+                    elif first_name:
+                        user_info = f"👤 {first_name}"
+                else:
+                    logger.warning(f"📨 User {user_id} not found in DB")
+                conn.close()
+        except Exception as e:
+            logger.error(f"❌ Error getting user info for notification: {e}")
         
-        # ✅ ИСПРАВЛЕНИЕ: Используем переданный db_instance
-        if db_instance:
+        # Формируем сообщение
+        status_emoji = {
+            'success': '✅',
+            'pending': '⏳',
+            'failed': '❌',
+            'canceled': '🚫',
+            'not_found': '🔍',
+            'error': '⚠️'
+        }.get(status, '❓')
+        
+        message = f"""
+{status_emoji} *ПРОВЕРКА ПЛАТЕЖА*
+
+{user_info}
+💳 *Система:* {method.upper()}
+🆔 *ID платежа:* `{payment_id}`
+📊 *Статус:* {status}
+🕐 *Время проверки:* {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}
+
+*Пользователь нажал кнопку "Проверить оплату"*
+"""
+        
+        logger.info(f"📨 Message prepared. Sending to admin...")
+        
+        # Отправляем всем администраторам
+        admin_ids = ["891422895"]  # Можно добавить больше ID
+        
+        for admin_id in admin_ids:
             try:
-                conn = db_instance.get_connection()
-                if conn:
-                    cursor = conn.cursor()
-                    cursor.execute(
-                        "SELECT username, first_name FROM users WHERE user_id = %s",
-                        (user_id,)
-                    )
-                    result = cursor.fetchone()
-                    if result:
-                        username, first_name = result
-                        if username:
-                            user_info = f"👤 {first_name or 'Пользователь'} (@{username})"
-                        elif first_name:
-                            user_info = f"👤 {first_name}"
-                    conn.close()
+                logger.info(f"📨 Sending to admin {admin_id}...")
+                await bot.send_message(
+                    chat_id=admin_id,
+                    text=message,
+                    parse_mode='Markdown'
+                )
+                logger.info(f"✅ Payment check notification sent to admin {admin_id}")
             except Exception as e:
-                logger.error(f"❌ Error getting user info for notification: {e}")
-            
-            # Формируем сообщение
-            status_emoji = {
-                'success': '✅',
-                'pending': '⏳',
-                'failed': '❌',
-                'canceled': '🚫',
-                'not_found': '🔍',
-                'error': '⚠️'
-            }.get(status, '❓')
-            
-            message = f"""
-    {status_emoji} *ПРОВЕРКА ПЛАТЕЖА*
-
-    {user_info}
-    💳 *Система:* {method.upper()}
-    🆔 *ID платежа:* `{payment_id}`
-    📊 *Статус:* {status}
-    🕐 *Время проверки:* {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}
-
-    *Пользователь нажал кнопку "Проверить оплату"*
-    """
-            
-            # Отправляем всем администраторам (включая ваш ID 891422895)
-            for admin_id in ["891422895"]:
-                try:
-                    await bot.send_message(
-                        chat_id=admin_id,
-                        text=message,
-                        parse_mode='Markdown'
-                    )
-                    logger.info(f"✅ Payment check notification sent to admin {admin_id}")
-                except Exception as e:
-                    logger.error(f"❌ Failed to notify admin {admin_id}: {e}")
-                    
+                logger.error(f"❌ Failed to notify admin {admin_id}: {e}")
+                logger.error(f"❌ Error details: {type(e).__name__}: {str(e)}")
+                
+        logger.info(f"📨 END: Notification completed for {payment_id}")
+        
     except Exception as e:
         logger.error(f"❌ Error in payment check notification: {e}")
-
-    
+        logger.error(f"❌ Full traceback:", exc_info=True)
