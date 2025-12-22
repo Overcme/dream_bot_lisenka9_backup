@@ -460,7 +460,7 @@ async def notify_admin_on_payment_check(user_id: int, payment_id: str, method: s
                 except Exception as e:
                     logger.error(f"❌ Failed to notify admin {admin_id}: {e}")
                     
-        except Exception as e:
-            logger.error(f"❌ Error in payment check notification: {e}")
+    except Exception as e:
+        logger.error(f"❌ Error in payment check notification: {e}")
 
     
