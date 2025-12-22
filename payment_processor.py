@@ -199,7 +199,6 @@ class PaymentProcessor:
         """Проверяет статус платежа"""
         logging.info(f"🔍 Checking payment status for: {payment_id}")
         
-        # Сначала проверяем в БД
         conn = self.db.get_connection()
         if not conn:
             logging.error("❌ No database connection")
@@ -215,32 +214,16 @@ class PaymentProcessor:
             
             if result:
                 status, payment_method = result
-                logging.info(f"🔍 Found in DB: status={status}, method={payment_method}")
                 
-                # Если статус pending и это PayPal, проверяем через API
-                if status == "pending" and payment_method == "paypal":
-                    logging.info(f"🔍 Checking PayPal payment via API: {payment_id}")
-                    api_status = self.check_paypal_payment_api(payment_id)
-                    if api_status != status:
-                        logging.info(f"🔍 API returned new status: {api_status}")
-                    return api_status
-                    
+                # Если статус pending, проверяем через API
+                if status == "pending":
+                    if payment_method == "paypal":
+                        return self.check_paypal_payment_api(payment_id)
+                    elif payment_method == "yookassa":
+                        return self.check_yookassa_payment_api(payment_id)
+                
                 return status
             else:
-                logging.warning(f"❌ Payment not found in DB: {payment_id}")
-                
-                # Попробуем найти по другому формату ID
-                # Иногда PayPal возвращает другой ID
-                cursor.execute(
-                    "SELECT payment_id, status FROM payments WHERE payment_id LIKE %s",
-                    (f"%{payment_id}%",)
-                )
-                similar = cursor.fetchone()
-                if similar:
-                    similar_id, similar_status = similar
-                    logging.info(f"🔍 Found similar payment: {similar_id} with status {similar_status}")
-                    return similar_status
-                    
                 return "not_found"
                 
         except Exception as e:
@@ -325,6 +308,41 @@ class PaymentProcessor:
         except Exception as e:
             logger.error(f"❌ Webhook verification error: {e}")
             return False
+
+    def check_yookassa_payment_api(self, payment_id):
+        """Проверяет платеж YooKassa через API"""
+        try:
+            import requests
+            import base64
+            
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Basic {base64.b64encode(f'{self.yookassa_shop_id}:{self.yookassa_secret_key}'.encode()).decode()}"
+            }
+            
+            response = requests.get(
+                f"https://api.yookassa.ru/v3/payments/{payment_id}",
+                headers=headers,
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                status = data.get("status", "")
+                
+                if status == "succeeded":
+                    return "success"
+                elif status in ["pending", "waiting_for_capture"]:
+                    return "pending"
+                else:
+                    return "failed"
+            else:
+                logger.error(f"YooKassa API error: {response.status_code} - {response.text}")
+                return "error"
+                
+        except Exception as e:
+            logger.error(f"YooKassa API check error: {e}")
+            return "error"
 
     def notify_admin(self, payment_data):
         """Отправляет уведомление администратору о платеже"""

@@ -272,21 +272,12 @@ async def check_specific_payment(query, context: ContextTypes.DEFAULT_TYPE, meth
     
     try:
         try:
-            task = asyncio.create_task(payment_processor.notify_admin_on_payment_check(
+            asyncio.create_task(notify_admin_on_payment_check(
                 user_id=query.from_user.id,
                 payment_id=payment_id,
                 method=method,
                 status="checking"
             ))
-            
-            # Добавляем обработку ошибок
-            def handle_task_result(task):
-                try:
-                    task.result()  # Проверяем результат
-                except Exception as e:
-                    logging.error(f"❌ Notification task failed: {e}")
-            
-            task.add_done_callback(handle_task_result)
             
         except Exception as e:
             logging.error(f"❌ Failed to create notification task: {e}")
@@ -304,7 +295,7 @@ async def check_specific_payment(query, context: ContextTypes.DEFAULT_TYPE, meth
                 user_id=query.from_user.id,
                 payment_id=payment_id,
                 method=method,
-                status=status  # Финальный статус
+                status=status
             ))
         except Exception as notify_error:
             logging.error(f"❌ Failed to send final notification: {notify_error}")
