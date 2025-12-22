@@ -394,19 +394,22 @@ class PaymentProcessor:
         except Exception as e:
             logger.error(f"Error in admin notification: {e}")
     
-async def notify_admin_on_payment_check(user_id: int, payment_id: str, method: str, status: str):
-        """Уведомляет администратора о проверке платежа"""
-        try:
-            from telegram import Bot
-            from config import BOT_TOKEN
-            
-            bot = Bot(token=BOT_TOKEN)
-            
-            # Получаем информацию о пользователе
-            conn = db.get_connection()
-            user_info = f"👤 ID: {user_id}"
-            if conn:
-                try:
+async def notify_admin_on_payment_check(user_id: int, payment_id: str, method: str, status: str, db_instance=None):
+    """Уведомляет администратора о проверке платежа"""
+    try:
+        from telegram import Bot
+        from config import BOT_TOKEN
+        
+        bot = Bot(token=BOT_TOKEN)
+        
+        # Получаем информацию о пользователе
+        user_info = f"👤 ID: {user_id}"
+        
+        # ✅ ИСПРАВЛЕНИЕ: Используем переданный db_instance
+        if db_instance:
+            try:
+                conn = db_instance.get_connection()
+                if conn:
                     cursor = conn.cursor()
                     cursor.execute(
                         "SELECT username, first_name FROM users WHERE user_id = %s",
@@ -420,8 +423,8 @@ async def notify_admin_on_payment_check(user_id: int, payment_id: str, method: s
                         elif first_name:
                             user_info = f"👤 {first_name}"
                     conn.close()
-                except Exception as e:
-                    logger.error(f"❌ Error getting user info for notification: {e}")
+            except Exception as e:
+                logger.error(f"❌ Error getting user info for notification: {e}")
             
             # Формируем сообщение
             status_emoji = {
@@ -459,5 +462,5 @@ async def notify_admin_on_payment_check(user_id: int, payment_id: str, method: s
                     
         except Exception as e:
             logger.error(f"❌ Error in payment check notification: {e}")
-            
+
     
