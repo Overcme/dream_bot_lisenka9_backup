@@ -7,7 +7,7 @@ from datetime import datetime, date
 import uuid
 import json
 import asyncio
-from payment_processor import PaymentProcessor
+from payment_processor import PaymentProcessor, notify_admin_on_payment_check
 from database import db 
 from config import ADMIN_IDS
 import keyboard
@@ -274,7 +274,7 @@ async def check_specific_payment(query, context: ContextTypes.DEFAULT_TYPE, meth
         try:
             # Импортируем асинхронно
             import asyncio
-            asyncio.create_task(payment_processor.notify_admin_on_payment_check(
+            asyncio.create_task(notify_admin_on_payment_check(
                 user_id=query.from_user.id,
                 payment_id=payment_id,
                 method=method,

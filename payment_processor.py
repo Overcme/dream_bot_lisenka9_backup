@@ -394,7 +394,7 @@ class PaymentProcessor:
         except Exception as e:
             logger.error(f"Error in admin notification: {e}")
     
-    async def notify_admin_on_payment_check(self, user_id: int, payment_id: str, method: str, status: str):
+async def notify_admin_on_payment_check(user_id: int, payment_id: str, method: str, status: str):
         """Уведомляет администратора о проверке платежа"""
         try:
             from telegram import Bot
@@ -459,4 +459,5 @@ class PaymentProcessor:
                     
         except Exception as e:
             logger.error(f"❌ Error in payment check notification: {e}")
+            
     
