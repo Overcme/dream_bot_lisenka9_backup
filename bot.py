@@ -113,13 +113,12 @@ class CourseScheduler:
             has_images = content['has_images']
             image_urls = content.get('image_urls', [])
             
-            image_index = 0  # Индекс для картинок
+            image_index = 0
             
             # Отправляем каждое сообщение по порядку
             for i, message in enumerate(messages):
-                if message and str(message).strip():  # Если сообщение не пустое
+                if message and str(message).strip():
                     try:
-                        # Конвертируем в HTML
                         html_message = DatabaseManager.markdown_to_html(str(message))
                         
                         await self.application.bot.send_message(
@@ -130,7 +129,6 @@ class CourseScheduler:
                         await asyncio.sleep(1)
                     except Exception as e:
                         logger.error(f"Error sending message {i+1} to {user_id}: {e}")
-                        # Попробуем отправить без разметки
                         try:
                             await self.application.bot.send_message(
                                 chat_id=user_id,
@@ -141,7 +139,6 @@ class CourseScheduler:
                         except:
                             pass
                 
-                # Если это пустое сообщение и есть картинки, отправляем картинку
                 elif has_images and image_index < len(image_urls):
                     try:
                         await self.application.bot.send_photo(
@@ -153,20 +150,22 @@ class CourseScheduler:
                     except Exception as e:
                         logger.error(f"Error sending image {image_index} to {user_id}: {e}")
             
-            # Обновляем прогресс пользователя
+            # ✅ ВАЖНОЕ ИСПРАВЛЕНИЕ: Обновляем прогресс ПОСЛЕ отправки
+            # day_number - это день, который мы ТОЛЬКО ЧТО отправили
+            # Значит следующий день будет day_number + 1
             self.update_user_progress(user_id, day_number)
             
             logger.info(f"✅ Day {day_number} sent to user {user_id}")
             
-            # Если это день 7, отправляем предложение марафона
+            # Если это был день 7, отправляем предложение марафона
             if day_number == 7:
                 await self.send_marathon_offer(user_id)
                 
         except Exception as e:
             logger.error(f"❌ Error in send_course_day: {e}")
 
-    def update_user_progress(self, user_id: int, current_day: int):
-        """Обновляет прогресс пользователя - ИСПРАВЛЕННАЯ ВЕРСИЯ"""
+    def update_user_progress(self, user_id: int, sent_day: int):
+        """Обновляет прогресс пользователя ПОСЛЕ отправки дня"""
         conn = self.db.get_connection()
         if not conn:
             return
@@ -174,35 +173,34 @@ class CourseScheduler:
         try:
             cursor = conn.cursor()
             
-            if current_day < 7:
-                # Переходим к следующему дню
-                next_day = current_day + 1
+            if sent_day < 7:
+                next_day = sent_day + 1
                 cursor.execute('''
                     UPDATE course_progress 
                     SET current_day = %s, 
-                        last_message_date = NOW(),  -- Используем last_message_date
+                        last_message_date = NOW(),
                         is_active = TRUE
                     WHERE user_id = %s
                 ''', (next_day, user_id))
+                logger.info(f"✅ Progress updated: sent day {sent_day}, set next day to {next_day}")
             else:
-                # Завершаем курс
                 cursor.execute('''
                     UPDATE course_progress 
                     SET is_active = FALSE,
                         completed_at = NOW(),
-                        last_message_date = NOW()  -- Используем last_message_date
+                        last_message_date = NOW()
                     WHERE user_id = %s
                 ''', (user_id,))
+                logger.info(f"✅ Course completed for user {user_id}")
             
             conn.commit()
-            logger.info(f"✅ Progress updated for user {user_id}: day {current_day}")
             
         except Exception as e:
             logger.error(f"❌ Error updating progress: {e}")
             conn.rollback()
         finally:
             conn.close()
-    
+
     async def send_marathon_offer(self, user_id: int):
         """Отправляет предложение марафона после завершения курса"""
         try:
@@ -660,7 +658,7 @@ def main():
         if hasattr(application, '_loop'):
             logger.info(f"🔍 Application._loop: {application._loop}")
             logger.info(f"🔍 Loop is running: {application._loop.is_running() if application._loop else 'No loop'}")
-            
+
         # Настраиваем обработчики
         setup_handlers(application)
         
