@@ -7,7 +7,7 @@ from datetime import datetime, date
 import uuid
 import json
 import asyncio
-from payment_processor import PaymentProcessor, notify_admin_on_payment_check
+from payment_processor import PaymentProcessor
 from database import db 
 from config import ADMIN_IDS
 import keyboard
@@ -266,23 +266,21 @@ async def check_specific_payment(query, context: ContextTypes.DEFAULT_TYPE, meth
     """Проверяет конкретный платеж"""
     logging.info(f"🔍 Starting check_specific_payment: {method}")
     
-    # Извлекаем payment_id из callback_data
     payment_id = query.data.replace(f"check_{method}_", "")
     logging.info(f"🔍 Payment ID to check: {payment_id}")
     
     try:
+        # ✅ УВЕДОМЛЕНИЕ
         try:
-            asyncio.create_task(notify_admin_on_payment_check(
+            asyncio.create_task(notify_admin_payment_check(
                 user_id=query.from_user.id,
                 payment_id=payment_id,
                 method=method,
                 status="checking"
             ))
-            
-        except Exception as e:
-            logging.error(f"❌ Failed to create notification task: {e}")
-
-        # Сначала отвечаем на callback
+        except Exception as notify_error:
+            logging.error(f"❌ Failed to send notification: {notify_error}")
+        
         await query.answer()
         
         # Проверяем статус платежа
@@ -291,7 +289,7 @@ async def check_specific_payment(query, context: ContextTypes.DEFAULT_TYPE, meth
         logging.info(f"🔍 Payment status: {status}")
         
         try:
-            asyncio.create_task(notify_admin_on_payment_check(
+            asyncio.create_task(notify_admin_payment_check(
                 user_id=query.from_user.id,
                 payment_id=payment_id,
                 method=method,
@@ -1506,3 +1504,69 @@ async def test_markdown_command(update: Update, context: ContextTypes.DEFAULT_TY
         except Exception as e:
             await update.message.reply_text(f"Ошибка теста {i+1}: {e}")
 
+async def notify_admin_payment_check(user_id: int, payment_id: str, method: str, status: str):
+    """Уведомляет администратора о проверке платежа"""
+    try:
+        from telegram import Bot
+        from config import BOT_TOKEN
+        from datetime import datetime
+        
+        bot = Bot(token=BOT_TOKEN)
+        
+        # Получаем информацию о пользователе
+        conn = db.get_connection()
+        user_info = f"👤 ID: {user_id}"
+        if conn:
+            try:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT username, first_name FROM users WHERE user_id = %s",
+                    (user_id,)
+                )
+                result = cursor.fetchone()
+                if result:
+                    username, first_name = result
+                    if username:
+                        user_info = f"👤 {first_name or 'Пользователь'} (@{username})"
+                    elif first_name:
+                        user_info = f"👤 {first_name}"
+                conn.close()
+            except Exception as e:
+                logger.error(f"❌ Error getting user info: {e}")
+        
+        # Формируем сообщение
+        status_emoji = {
+            'success': '✅',
+            'pending': '⏳',
+            'failed': '❌',
+            'canceled': '🚫',
+            'not_found': '🔍',
+            'error': '⚠️'
+        }.get(status, '❓')
+        
+        message = f"""
+{status_emoji} *ПРОВЕРКА ПЛАТЕЖА*
+
+{user_info}
+💳 *Система:* {method.upper()}
+🆔 *ID платежа:* `{payment_id}`
+📊 *Статус:* {status}
+🕐 *Время проверки:* {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}
+
+*Пользователь нажал кнопку "Проверить оплату"*
+"""
+        
+        # Отправляем всем администраторам
+        for admin_id in ["891422895"]:
+            try:
+                await bot.send_message(
+                    chat_id=admin_id,
+                    text=message,
+                    parse_mode='Markdown'
+                )
+                logger.info(f"✅ Payment check notification sent to admin {admin_id}")
+            except Exception as e:
+                logger.error(f"❌ Failed to notify admin {admin_id}: {e}")
+                
+    except Exception as e:
+        logger.error(f"❌ Error in payment check notification: {e}")
