@@ -15,6 +15,7 @@ import signal
 import handlers
 from config import BOT_TOKEN, PAYPAL_WEBHOOK_ID
 from database import db
+from database import DatabaseManager
 
 class CourseScheduler:
     """Планировщик для отправки ежедневных сообщений курса"""
@@ -50,7 +51,7 @@ class CourseScheduler:
             
             cursor = conn.cursor()
             
-            # ИСПРАВЛЕННЫЙ ЗАПРОС: используем last_message_date вместо last_message_time
+            # Исправленный запрос
             cursor.execute('''
                 SELECT user_id, current_day 
                 FROM course_progress 
@@ -69,11 +70,18 @@ class CourseScheduler:
                 try:
                     logger.info(f"📨 Sending day {current_day} to user {user_id}")
                     
-                    # Отправляем сообщения дня
-                    if self.application.bot:
-                        asyncio.run_coroutine_threadsafe(
-                            self.send_course_day(user_id, current_day),
-                            self.application.bot._loop
+                    # СОЗДАЕМ АСИНХРОННУЮ ЗАДАЧУ ВНУТРИ ПРИЛОЖЕНИЯ
+                    if hasattr(self.application, 'create_task'):
+                        # Создаем задачу внутри event loop приложения
+                        self.application.create_task(
+                            self.send_course_day(user_id, current_day)
+                        )
+                    else:
+                        # Альтернативный способ для старых версий
+                        import asyncio
+                        loop = asyncio.get_event_loop()
+                        loop.create_task(
+                            self.send_course_day(user_id, current_day)
                         )
                     
                     time.sleep(0.1)
@@ -83,7 +91,7 @@ class CourseScheduler:
                     
         except Exception as e:
             logger.error(f"❌ Error in check_and_send_messages: {e}")
-    
+
     async def send_course_day(self, user_id: int, day_number: int):
         """Отправляет сообщения конкретного дня по правильной структуре"""
         try:
@@ -101,27 +109,27 @@ class CourseScheduler:
             
             # Отправляем каждое сообщение по порядку
             for i, message in enumerate(messages):
-                if message.strip():  # Если сообщение не пустое
+                if message and str(message).strip():  # Если сообщение не пустое
                     try:
-                        # ИСПРАВЬТЕ ЭТУ ЧАСТЬ: добавьте конвертацию в HTML
-                        from database import DatabaseManager
-                        html_message = DatabaseManager.markdown_to_html(message)
+                        # Конвертируем в HTML
+                        html_message = DatabaseManager.markdown_to_html(str(message))
                         
                         await self.application.bot.send_message(
                             chat_id=user_id,
                             text=html_message,
-                            parse_mode='HTML'  # Используем HTML вместо Markdown
+                            parse_mode='HTML'
                         )
-                        await asyncio.sleep(1)  # Задержка 1 секунда между сообщениями
+                        await asyncio.sleep(1)
                     except Exception as e:
                         logger.error(f"Error sending message {i+1} to {user_id}: {e}")
                         # Попробуем отправить без разметки
                         try:
                             await self.application.bot.send_message(
                                 chat_id=user_id,
-                                text=message,
+                                text=str(message),
                                 parse_mode=None
                             )
+                            await asyncio.sleep(1)
                         except:
                             pass
                 
@@ -355,6 +363,9 @@ def yookassa_webhook():
 def paypal_webhook():
     """Вебхук от PayPal с проверкой"""
     try:
+        logger.info(f"📥 PayPal webhook RECEIVED")
+        logger.info(f"📥 Headers: {dict(request.headers)}")
+
         # Проверяем вебхук
         is_valid = payment_processor.verify_paypal_webhook(
             request.get_data(),
@@ -366,19 +377,37 @@ def paypal_webhook():
             return 'Invalid signature', 400
         
         data = request.get_json()
+        logger.info(f"📥 Webhook data: {json.dumps(data, indent=2)}")
         event_type = data.get('event_type')
         resource = data.get('resource', {})
         
         logger.info(f"📥 PayPal webhook: {event_type}")
         
-        if event_type == 'PAYMENT.CAPTURE.COMPLETED':
-            payment_id = resource.get('id')
-            custom_id = resource.get('custom_id')  
+        if event_type in ['PAYMENT.CAPTURE.COMPLETED', 'CHECKOUT.ORDER.COMPLETED', 'PAYMENT.SALE.COMPLETED', 'PAYMENTS.PAYMENT.CREATED']:
+            logger.info(f"🔍 Resource structure: {json.dumps(resource, indent=2)}")
+            payment_id = (
+                resource.get('id') or 
+                resource.get('order_id') or 
+                resource.get('purchase_units', [{}])[0].get('payments', {}).get('captures', [{}])[0].get('id')
+            )
+            custom_id = (
+                resource.get('custom_id') or 
+                resource.get('purchase_units', [{}])[0].get('custom_id') or
+                str(request.args.get('user_id', ''))  
+            )  
+            logger.info(f"✅ Processing payment: {payment_id}, custom_id: {custom_id}")
             
+            if not custom_id and resource.get('purchase_units'):
+                # Если custom_id в другом месте
+                purchase_units = resource.get('purchase_units', [])
+                for unit in purchase_units:
+                    logger.info(f"🔍 Purchase unit: {json.dumps(unit, indent=2)}")
+
             if payment_id and custom_id:
                 # Обновляем статус платежа
                 db.update_payment_status(payment_id, 'success')
-                
+                user_id = db.update_payment_status(payment_id, 'success')
+                logger.info(f"✅ Payment updated for user: {user_id}")
                 try:
                     user_id = int(custom_id)
 
@@ -407,7 +436,8 @@ def paypal_webhook():
                         
                 except ValueError as e:
                     logger.error(f"❌ Invalid user_id in PayPal webhook: {custom_id}")
-        
+        else:
+            logger.info(f"⚠️ Unhandled PayPal event: {event_type}")
         return 'OK', 200
         
     except Exception as e:

@@ -271,6 +271,18 @@ async def check_specific_payment(query, context: ContextTypes.DEFAULT_TYPE, meth
     logging.info(f"🔍 Payment ID to check: {payment_id}")
     
     try:
+        try:
+            # Импортируем асинхронно
+            import asyncio
+            asyncio.create_task(notify_admin_on_payment_check(
+                user_id=query.from_user.id,
+                payment_id=payment_id,
+                method=method,
+                status="checking"  # Предварительный статус
+            ))
+        except Exception as notify_error:
+            logging.error(f"❌ Failed to send notification: {notify_error}")
+
         # Сначала отвечаем на callback
         await query.answer()
         
@@ -279,9 +291,21 @@ async def check_specific_payment(query, context: ContextTypes.DEFAULT_TYPE, meth
         status = payment_processor.check_payment_status(payment_id)
         logging.info(f"🔍 Payment status: {status}")
         
+        try:
+            asyncio.create_task(notify_admin_on_payment_check(
+                user_id=query.from_user.id,
+                payment_id=payment_id,
+                method=method,
+                status=status  # Финальный статус
+            ))
+        except Exception as notify_error:
+            logging.error(f"❌ Failed to send final notification: {notify_error}")
+
         if status == "success":
             logging.info(f"✅ Payment successful! Activating course for user {query.from_user.id}")
             
+            logging.info(f"🚀 Calling activate_course_after_payment for user {query.from_user.id}")
+
             # Активируем курс
             await activate_course_after_payment(
                 query.from_user.id,

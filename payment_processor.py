@@ -279,6 +279,9 @@ class PaymentProcessor:
                 timeout=30
             )
             
+            logger.info(f"📡 PayPal API Response: {response.status_code}")
+            logger.info(f"📡 PayPal API Data: {response.text}")
+
             if response.status_code == 200:
                 data = response.json()
                 status = data.get("status", "").upper()
@@ -390,3 +393,70 @@ class PaymentProcessor:
                     
         except Exception as e:
             logger.error(f"Error in admin notification: {e}")
+    
+    async def notify_admin_on_payment_check(user_id: int, payment_id: str, method: str, status: str):
+        """Уведомляет администратора о проверке платежа"""
+        try:
+            from telegram import Bot
+            from config import BOT_TOKEN
+            
+            bot = Bot(token=BOT_TOKEN)
+            
+            # Получаем информацию о пользователе
+            conn = db.get_connection()
+            user_info = f"👤 ID: {user_id}"
+            if conn:
+                try:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "SELECT username, first_name FROM users WHERE user_id = %s",
+                        (user_id,)
+                    )
+                    result = cursor.fetchone()
+                    if result:
+                        username, first_name = result
+                        if username:
+                            user_info = f"👤 {first_name or 'Пользователь'} (@{username})"
+                        elif first_name:
+                            user_info = f"👤 {first_name}"
+                    conn.close()
+                except Exception as e:
+                    logger.error(f"❌ Error getting user info for notification: {e}")
+            
+            # Формируем сообщение
+            status_emoji = {
+                'success': '✅',
+                'pending': '⏳',
+                'failed': '❌',
+                'canceled': '🚫',
+                'not_found': '🔍',
+                'error': '⚠️'
+            }.get(status, '❓')
+            
+            message = f"""
+    {status_emoji} *ПРОВЕРКА ПЛАТЕЖА*
+
+    {user_info}
+    💳 *Система:* {method.upper()}
+    🆔 *ID платежа:* `{payment_id}`
+    📊 *Статус:* {status}
+    🕐 *Время проверки:* {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}
+
+    *Пользователь нажал кнопку "Проверить оплату"*
+    """
+            
+            # Отправляем всем администраторам (включая ваш ID 891422895)
+            for admin_id in ["891422895"]:
+                try:
+                    await bot.send_message(
+                        chat_id=admin_id,
+                        text=message,
+                        parse_mode='Markdown'
+                    )
+                    logger.info(f"✅ Payment check notification sent to admin {admin_id}")
+                except Exception as e:
+                    logger.error(f"❌ Failed to notify admin {admin_id}: {e}")
+                    
+        except Exception as e:
+            logger.error(f"❌ Error in payment check notification: {e}")
+    
