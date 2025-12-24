@@ -62,7 +62,6 @@ class CourseScheduler:
             
             cursor = conn.cursor()
             
-            # ✅ ИСПРАВЛЕНИЕ: проверяем, что курс еще активен
             cursor.execute('''
                 SELECT user_id, current_day 
                 FROM course_progress 
@@ -81,14 +80,8 @@ class CourseScheduler:
                 try:
                     logger.info(f"📨 Sending day {current_day} to user {user_id}")
                     
-                    # Отправляем день
+                    # Просто отправляем день - завершение курса обрабатывается внутри send_course_day
                     asyncio.run(self.send_course_day(user_id, current_day))
-                    
-                    # ✅ ДОБАВЛЯЕМ ЗАДЕРЖКУ после отправки последнего дня
-                    if current_day == 7:
-                        logger.info(f"🎉 User {user_id} completed the course")
-                        # Обновляем БД чтобы отметить курс завершенным
-                        self.mark_course_completed_in_db(user_id)
                     
                     time.sleep(0.1)
                     
@@ -101,7 +94,9 @@ class CourseScheduler:
     async def send_course_day(self, user_id: int, day_number: int):
         """Отправляет сообщения конкретного дня по правильной структуре"""
         try:
+            # ✅ ПРОВЕРЯЕМ, не завершен ли уже курс
             conn = self.db.get_connection()
+            course_active = True
             if conn:
                 cursor = conn.cursor()
                 cursor.execute(
@@ -114,6 +109,10 @@ class CourseScheduler:
                 if result and not result[0]:  # Курс уже не активен
                     logger.info(f"⚠️ Course already completed for user {user_id}, skipping")
                     return
+                elif not result:
+                    logger.warning(f"⚠️ No course progress found for user {user_id}")
+                    return
+            
             # Получаем контент дня
             content = self.db.get_course_content(day_number)
             if not content:
@@ -161,27 +160,22 @@ class CourseScheduler:
                     except Exception as e:
                         logger.error(f"Error sending image {image_index} to {user_id}: {e}")
             
-            # Обновляем прогресс пользователя
+            # ✅ ОБНОВЛЯЕМ ПРОГРЕСС ПОСЛЕ ОТПРАВКИ ДНЯ
             self.update_user_progress(user_id, day_number)
             
             logger.info(f"✅ Day {day_number} sent to user {user_id}")
             
-            # ✅ ИЗМЕНЕНИЕ: Если это день 7, отправляем предложение КОНСУЛЬТАЦИИ вместо марафона
+            # ✅ ВАЖНОЕ ИСПРАВЛЕНИЕ: Отправляем предложение консультации ПЕРЕД отметкой курса как завершенного
             if day_number == 7:
-                conn = self.db.get_connection()
-                if conn:
-                    cursor = conn.cursor()
-                    cursor.execute(
-                        "SELECT is_active FROM course_progress WHERE user_id = %s",
-                        (user_id,)
-                    )
-                    result = cursor.fetchone()
-                    conn.close()
-                    
-                    if result and result[0]:  # Курс все еще активен
-                        await self.send_consultation_offer(user_id)
-                        # Теперь отмечаем как завершенный
-                        self.mark_course_completed_in_db(user_id)
+                logger.info(f"🎯 Sending consultation offer for day 7 to user {user_id}")
+                
+                # 1. Сначала отправляем предложение консультации
+                await self.send_consultation_offer(user_id)
+                
+                # 2. Только ПОСЛЕ этого отмечаем курс как завершенный
+                self.mark_course_completed_in_db(user_id)
+                
+                logger.info(f"🎉 User {user_id} completed the course with consultation offer")
                 
         except Exception as e:
             logger.error(f"❌ Error in send_course_day: {e}")
@@ -269,9 +263,10 @@ class CourseScheduler:
 
     async def send_consultation_offer(self, user_id: int):
         """Отправляет предложение консультации после завершения курса"""
+        logger.info(f"🚀 START send_consultation_offer for user {user_id}")
         try:
             from telegram import InlineKeyboardMarkup, InlineKeyboardButton
-            
+            logger.info(f"📝 Preparing consultation text for user {user_id}")
             # Текст предложения консультации
             consultation_text = """
 🔥 *Поздравляю с завершением 7-дневного пути!*
@@ -289,12 +284,13 @@ class CourseScheduler:
 Предлагаю вам записаться на индивидуальную консультацию.
 
 """
-            
+            logger.info(f"🎨 Creating keyboard buttons for user {user_id}")
             # Создаем кнопки
             keyboard = InlineKeyboardMarkup([
                 [InlineKeyboardButton("📝 Записаться на консультацию", callback_data="consult_offer")],
                 [InlineKeyboardButton("👥 Обзор групповых программ", url="https://skromova.ru/")]
             ])
+            logger.info(f"📤 Sending consultation message to user {user_id}")
             
             # Сначала отправляем текст с кнопками
             await self.application.bot.send_message(
@@ -303,7 +299,6 @@ class CourseScheduler:
                 reply_markup=keyboard,
                 parse_mode='Markdown'
             )
-            
             
             
             logger.info(f"✅ Consultation offer sent to user {user_id}")
