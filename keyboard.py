@@ -49,7 +49,6 @@ def get_consultation_offer_keyboard():
 def get_consult_keyboard():
     """Клавиатура для страницы консультации"""
     keyboard = [
-        [InlineKeyboardButton("📝 Записаться на консультацию и заполнить форму", callback_data="start_consult_form")],
-        [InlineKeyboardButton("👥 Групповые программы", url="https://skromova.ru/")]
+        [InlineKeyboardButton("📝 Записаться на консультацию и заполнить форму", callback_data="start_consult_form")]
     ]
     return InlineKeyboardMarkup(keyboard)
