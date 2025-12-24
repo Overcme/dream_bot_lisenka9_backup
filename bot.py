@@ -62,6 +62,7 @@ class CourseScheduler:
             
             cursor = conn.cursor()
             
+            # ✅ ИСПРАВЛЕНИЕ: проверяем, что курс еще активен
             cursor.execute('''
                 SELECT user_id, current_day 
                 FROM course_progress 
@@ -80,17 +81,14 @@ class CourseScheduler:
                 try:
                     logger.info(f"📨 Sending day {current_day} to user {user_id}")
                     
-                    if self.loop and self.loop.is_running():
-                        # Используем существующий loop
-                        future = asyncio.run_coroutine_threadsafe(
-                            self.send_course_day(user_id, current_day),
-                            self.loop
-                        )
-                        # Можно добавить обработку результата если нужно
-                        # result = future.result(timeout=30)
-                    else:
-                        # Создаем новый loop для этого вызова
-                        asyncio.run(self.send_course_day_safe(user_id, current_day))
+                    # Отправляем день
+                    asyncio.run(self.send_course_day(user_id, current_day))
+                    
+                    # ✅ ДОБАВЛЯЕМ ЗАДЕРЖКУ после отправки последнего дня
+                    if current_day == 7:
+                        logger.info(f"🎉 User {user_id} completed the course")
+                        # Обновляем БД чтобы отметить курс завершенным
+                        self.mark_course_completed_in_db(user_id)
                     
                     time.sleep(0.1)
                     
@@ -103,6 +101,19 @@ class CourseScheduler:
     async def send_course_day(self, user_id: int, day_number: int):
         """Отправляет сообщения конкретного дня по правильной структуре"""
         try:
+            conn = self.db.get_connection()
+            if conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT is_active FROM course_progress WHERE user_id = %s",
+                    (user_id,)
+                )
+                result = cursor.fetchone()
+                conn.close()
+                
+                if result and not result[0]:  # Курс уже не активен
+                    logger.info(f"⚠️ Course already completed for user {user_id}, skipping")
+                    return
             # Получаем контент дня
             content = self.db.get_course_content(day_number)
             if not content:
@@ -157,7 +168,20 @@ class CourseScheduler:
             
             # ✅ ИЗМЕНЕНИЕ: Если это день 7, отправляем предложение КОНСУЛЬТАЦИИ вместо марафона
             if day_number == 7:
-                await self.send_consultation_offer(user_id)
+                conn = self.db.get_connection()
+                if conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "SELECT is_active FROM course_progress WHERE user_id = %s",
+                        (user_id,)
+                    )
+                    result = cursor.fetchone()
+                    conn.close()
+                    
+                    if result and result[0]:  # Курс все еще активен
+                        await self.send_consultation_offer(user_id)
+                        # Теперь отмечаем как завершенный
+                        self.mark_course_completed_in_db(user_id)
                 
         except Exception as e:
             logger.error(f"❌ Error in send_course_day: {e}")
@@ -195,6 +219,50 @@ class CourseScheduler:
             
         except Exception as e:
             logger.error(f"❌ Error updating progress: {e}")
+            conn.rollback()
+        finally:
+            conn.close()
+
+    def mark_course_completed_in_db(self, user_id: int):
+        """Отмечает курс как завершенный в базе данных"""
+        conn = self.db.get_connection()
+        if not conn:
+            return
+        
+        try:
+            cursor = conn.cursor()
+            
+            # Проверяем, есть ли столбец completed_at
+            cursor.execute('''
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'course_progress' 
+                AND column_name = 'completed_at'
+            ''')
+            
+            has_completed_at = cursor.fetchone() is not None
+            
+            if has_completed_at:
+                cursor.execute('''
+                    UPDATE course_progress 
+                    SET is_active = FALSE,
+                        completed_at = NOW(),
+                        last_message_date = NOW()
+                    WHERE user_id = %s
+                ''', (user_id,))
+            else:
+                cursor.execute('''
+                    UPDATE course_progress 
+                    SET is_active = FALSE,
+                        last_message_date = NOW()
+                    WHERE user_id = %s
+                ''', (user_id,))
+            
+            conn.commit()
+            logger.info(f"✅ Course marked as completed for user {user_id}")
+            
+        except Exception as e:
+            logger.error(f"❌ Error marking course completed: {e}")
             conn.rollback()
         finally:
             conn.close()
