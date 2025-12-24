@@ -150,16 +150,14 @@ class CourseScheduler:
                     except Exception as e:
                         logger.error(f"Error sending image {image_index} to {user_id}: {e}")
             
-            # ✅ ВАЖНОЕ ИСПРАВЛЕНИЕ: Обновляем прогресс ПОСЛЕ отправки
-            # day_number - это день, который мы ТОЛЬКО ЧТО отправили
-            # Значит следующий день будет day_number + 1
+            # Обновляем прогресс пользователя
             self.update_user_progress(user_id, day_number)
             
             logger.info(f"✅ Day {day_number} sent to user {user_id}")
             
-            # Если это был день 7, отправляем предложение марафона
+            # ✅ ИЗМЕНЕНИЕ: Если это день 7, отправляем предложение КОНСУЛЬТАЦИИ вместо марафона
             if day_number == 7:
-                await self.send_marathon_offer(user_id)
+                await self.send_consultation_offer(user_id)
                 
         except Exception as e:
             logger.error(f"❌ Error in send_course_day: {e}")
@@ -200,6 +198,61 @@ class CourseScheduler:
             conn.rollback()
         finally:
             conn.close()
+
+    async def send_consultation_offer(self, user_id: int):
+        """Отправляет предложение консультации после завершения курса"""
+        try:
+            from telegram import InlineKeyboardMarkup, InlineKeyboardButton
+            
+            # Текст предложения консультации
+            consultation_text = """
+    🔥 *Поздравляю с завершением 7-дневного пути!*
+
+    Вы прошли важный этап работы со своими мечтами и целями. Теперь у вас есть четкое понимание, куда двигаться дальше. 
+
+    ✨ *Что дальше?*
+
+    Если вы хотите:
+    • Погрузиться глубже в свои запросы
+    • Проработать внутренние блоки и страхи
+    • Получить индивидуальную поддержку на пути к цели
+    • Разобраться в сложных жизненных ситуациях
+
+    Предлагаю вам записаться на индивидуальную консультацию.
+
+    """
+            
+            # Создаем кнопки
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("📝 Записаться на консультацию", callback_data="consult_offer")],
+                [InlineKeyboardButton("👥 Обзор групповых программ", url="https://skromova.ru/")]
+            ])
+            
+            # Сначала отправляем текст с кнопками
+            await self.application.bot.send_message(
+                chat_id=user_id,
+                text=consultation_text,
+                reply_markup=keyboard,
+                parse_mode='Markdown'
+            )
+            
+            # Можно добавить фото консультации (опционально)
+            try:
+                photo_url = "https://ibb.co/SXQR8ryT"
+                await self.application.bot.send_photo(
+                    chat_id=user_id,
+                    photo=photo_url,
+                    caption="💫 *Индивидуальная работа с психотерапевтом*",
+                    parse_mode='Markdown'
+                )
+            except Exception as e:
+                logger.error(f"❌ Error sending consultation photo: {e}")
+                # Продолжаем без фото
+            
+            logger.info(f"✅ Consultation offer sent to user {user_id}")
+            
+        except Exception as e:
+            logger.error(f"❌ Error sending consultation offer: {e}")
 
     async def send_marathon_offer(self, user_id: int):
         """Отправляет предложение марафона после завершения курса"""
@@ -519,6 +572,11 @@ def setup_handlers(application):
     application.add_handler(CommandHandler("test_markdown", handlers.test_markdown_command))
 
     application.add_handler(CallbackQueryHandler(handlers.button_handler))
+
+    application.add_handler(MessageHandler(
+        filters.TEXT & ~filters.COMMAND,
+        handlers.handle_consult_form
+    ))
 
 async def enhanced_error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Улучшенный обработчик ошибок с обработкой конфликтов"""

@@ -37,3 +37,19 @@ def get_payment_retry_keyboard(method: str):
             [InlineKeyboardButton("◀️ Назад к выбору", callback_data="back_to_payment_method")]
         ]
     return InlineKeyboardMarkup(keyboard)
+
+def get_consultation_offer_keyboard():
+    """Клавиатура для предложения консультации после курса"""
+    keyboard = [
+        [InlineKeyboardButton("📝 Записаться на консультацию", callback_data="consult_offer")],
+        [InlineKeyboardButton("👥 Обзор групповых программ", url="https://skromova.ru/")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+def get_consult_keyboard():
+    """Клавиатура для страницы консультации"""
+    keyboard = [
+        [InlineKeyboardButton("📝 Записаться на консультацию и заполнить форму", callback_data="start_consult_form")],
+        [InlineKeyboardButton("👥 Групповые программы", url="https://skromova.ru/")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
