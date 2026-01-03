@@ -464,7 +464,7 @@ async def activate_course_after_payment(user_id: int, payment_id: str, method: s
             # Удаляем старую запись если есть
             cursor.execute("DELETE FROM course_progress WHERE user_id = %s", (user_id,))
             
-            # Создаем новую запись
+            # ✅ ИСПРАВЛЕНИЕ 1: создаем запись с current_day = 1 (день для отправки)
             cursor.execute('''
                 INSERT INTO course_progress 
                 (user_id, current_day, last_message_date, is_active)
@@ -472,10 +472,10 @@ async def activate_course_after_payment(user_id: int, payment_id: str, method: s
             ''', (user_id,))
             
             conn.commit()
-            conn.close()
-            logging.info(f"✅ Course progress created for user {user_id}")
+            logging.info(f"✅ Course progress created for user {user_id}: current_day=1")
         else:
             logging.error("❌ No database connection")
+            return
         
         # Отправляем сообщение об успешной оплате
         logging.info(f"📨 Sending success message to user {user_id}")
@@ -493,6 +493,26 @@ async def activate_course_after_payment(user_id: int, payment_id: str, method: s
         logging.info(f"📚 Sending Day 1 to user {user_id}")
         await send_course_day1(user_id, application)
         
+        # ✅ ИСПРАВЛЕНИЕ 2: ОБНОВЛЯЕМ current_day ПОСЛЕ отправки Дня 1
+        # Мы только что отправили день 1, значит следующий день = 2
+        logging.info(f"🔄 Updating progress after Day 1: current_day=1 -> 2")
+        
+        conn = db.get_connection()
+        if conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                UPDATE course_progress 
+                SET current_day = 2, 
+                    last_message_date = NOW(),
+                    is_active = TRUE
+                WHERE user_id = %s
+            ''', (user_id,))
+            conn.commit()
+            conn.close()
+            logging.info(f"✅ Progress updated: user {user_id} ready for Day 2")
+        else:
+            logging.error("❌ No DB connection for update")
+        
         # Уведомляем администратора
         logging.info(f"📢 Notifying admin about user {user_id}")
         payment_processor.notify_admin({
@@ -508,7 +528,6 @@ async def activate_course_after_payment(user_id: int, payment_id: str, method: s
         
     except Exception as e:
         logging.error(f"❌ Error activating course for user {user_id}: {e}", exc_info=True)
-        # Пытаемся отправить пользователю сообщение об ошибке
         try:
             await application.bot.send_message(
                 chat_id=user_id,
