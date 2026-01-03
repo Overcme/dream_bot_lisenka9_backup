@@ -140,7 +140,7 @@ class CourseScheduler:
                     except Exception as e:
                         logger.error(f"Error sending message {i+1} to {user_id}: {e}")
                         try:
-                           await self.application.bot.send_message(
+                            await self.application.bot.send_message(
                                 chat_id=user_id,
                                 text=str(message).replace('**', '').replace('*', ''),
                                 parse_mode=None
