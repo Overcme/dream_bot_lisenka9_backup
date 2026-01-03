@@ -133,16 +133,16 @@ class CourseScheduler:
                         
                         await self.application.bot.send_message(
                             chat_id=user_id,
-                            text=html_message,
-                            parse_mode='HTML'
+                            text=str(message),
+                            parse_mode='Markdown'
                         )
                         await asyncio.sleep(1)
                     except Exception as e:
                         logger.error(f"Error sending message {i+1} to {user_id}: {e}")
                         try:
-                            await self.application.bot.send_message(
+                           await self.application.bot.send_message(
                                 chat_id=user_id,
-                                text=str(message),
+                                text=str(message).replace('**', '').replace('*', ''),
                                 parse_mode=None
                             )
                             await asyncio.sleep(1)
