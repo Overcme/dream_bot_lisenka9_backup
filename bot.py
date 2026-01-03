@@ -133,8 +133,8 @@ class CourseScheduler:
                         
                         await self.application.bot.send_message(
                             chat_id=user_id,
-                            text=str(message),
-                            parse_mode='Markdown'
+                            text=html_message,
+                            parse_mode='HTML'
                         )
                         await asyncio.sleep(1)
                     except Exception as e:
@@ -142,7 +142,7 @@ class CourseScheduler:
                         try:
                             await self.application.bot.send_message(
                                 chat_id=user_id,
-                                text=str(message).replace('**', '').replace('*', ''),
+                                text=str(message),
                                 parse_mode=None
                             )
                             await asyncio.sleep(1)

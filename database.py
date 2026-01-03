@@ -679,14 +679,23 @@ class DatabaseManager:
         
         import re
         
+        # ✅ ИСПРАВЛЕНИЕ: Правильно обрабатываем двойные звездочки
         # **жирный** -> <b>жирный</b>
-        text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
+        # Нужно захватывать текст между **, но не трогать одиночные *
+        text = re.sub(r'\*\*([^\*]+?)\*\*', r'<b>\1</b>', text)
+        
         # *курсив* -> <i>курсив</i>
-        text = re.sub(r'\*(.+?)\*', r'<i>\1</i>', text, flags=re.DOTALL)
+        # Только если это не часть **
+        text = re.sub(r'(?<!\*)\*([^\*]+?)\*(?!\*)', r'<i>\1</i>', text)
+        
         # `код` -> <code>код</code>
-        text = re.sub(r'`(.+?)`', r'<code>\1</code>', text)
+        text = re.sub(r'`([^`]+?)`', r'<code>\1</code>', text)
+        
         # [текст](ссылка) -> <a href="ссылка">текст</a>
-        text = re.sub(r'\[(.+?)\]\((.+?)\)', r'<a href="\2">\1</a>', text)
+        text = re.sub(r'\[([^\]]+?)\]\(([^)]+?)\)', r'<a href="\2">\1</a>', text)
+        
+        # Экранируем специальные символы HTML
+        text = text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
         
         return text
 
