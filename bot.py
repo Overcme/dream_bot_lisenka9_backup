@@ -129,13 +129,22 @@ class CourseScheduler:
             for i, message in enumerate(messages):
                 if message and str(message).strip():
                     try:
-                        html_message = DatabaseManager.markdown_to_html(str(message))
-                        
-                        await self.application.bot.send_message(
-                            chat_id=user_id,
-                            text=html_message,
-                            parse_mode='HTML'
-                        )
+                        message_text = str(message)
+                    
+                        if "**" in message_text or "*" in message_text or "`" in message_text:
+                            # Пробуем отправить как Markdown
+                            await self.application.bot.send_message(
+                                chat_id=user_id,
+                                text=message_text,
+                                parse_mode='MarkdownV2'  # Используем MarkdownV2
+                            )
+                        else:
+                            # Без разметки
+                            await self.application.bot.send_message(
+                                chat_id=user_id,
+                                text=message_text,
+                                parse_mode=None
+                            )
                         await asyncio.sleep(1)
                     except Exception as e:
                         logger.error(f"Error sending message {i+1} to {user_id}: {e}")
